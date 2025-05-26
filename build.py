@@ -14,10 +14,12 @@ NDK_DIR = os.path.abspath("android-ndk-r21e")
 TOOLCHAIN_PATH = f"{NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin"
 CROSS_COMPILE = "aarch64-linux-android-"
 ARCH = "arm64"
+KERNEL_DIR = "realme_kernel"
+DRIVER_DIR = "mt7601u"
 
-def run(cmd, cwd=None):
+def run(cmd, cwd=None, env=None):
     print(f"[RUN] {cmd}")
-    subprocess.run(cmd, shell=True, check=True, cwd=cwd)
+    subprocess.run(cmd, shell=True, check=True, cwd=cwd, env=env)
 
 def download_file(url, dst):
     print(f"[+] Downloading: {url}")
@@ -34,28 +36,44 @@ def setup_ndk():
     print("[+] NDK toolchain added to PATH.")
 
 def clone_kernel():
-    if not os.path.exists("realme_kernel"):
-        run(f"git clone {KERNEL_SOURCE_URL} realme_kernel")
+    if not os.path.exists(KERNEL_DIR):
+        run(f"git clone {KERNEL_SOURCE_URL} {KERNEL_DIR}")
     else:
         print("[i] Kernel source sudah ada.")
 
 def get_config():
-    config_path = os.path.join("realme_kernel", "config.gz")
+    config_path = os.path.join(KERNEL_DIR, "config.gz")
     if not os.path.isfile(config_path):
         download_file(CONFIG_URL, config_path)
-        run("zcat config.gz > .config", cwd="realme_kernel")
-    else:
-        print("[i] config.gz sudah tersedia.")
+    run("zcat config.gz > .config", cwd=KERNEL_DIR)
 
 def prepare_kernel():
-    run(f"make ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} olddefconfig", cwd="realme_kernel")
-    run(f"make ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} prepare", cwd="realme_kernel")
-    run(f"make ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} modules_prepare", cwd="realme_kernel")
+    env = os.environ.copy()
+    env["ARCH"] = ARCH
+    env["SUBARCH"] = ARCH
+    env["CROSS_COMPILE"] = f"{TOOLCHAIN_PATH}/{CROSS_COMPILE}"
+    env["CC"] = f"{TOOLCHAIN_PATH}/clang"
+    env["CLANG_TRIPLE"] = "aarch64-linux-android-"
+    env["LLVM"] = "1"
+
+    run("make LLVM=1 olddefconfig", cwd=KERNEL_DIR, env=env)
+    run("make LLVM=1 prepare", cwd=KERNEL_DIR, env=env)
+    run("make LLVM=1 modules_prepare", cwd=KERNEL_DIR, env=env)
 
 def build_driver():
-    if not os.path.exists("mt7601u"):
-        run("git clone https://github.com/terence-deng/mt7601u.git")
-    run(f"make ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} KERNELDIR=../realme_kernel", cwd="mt7601u")
+    if not os.path.exists(DRIVER_DIR):
+        run(f"git clone https://github.com/terence-deng/mt7601u.git {DRIVER_DIR}")
+    
+    env = os.environ.copy()
+    env["ARCH"] = ARCH
+    env["SUBARCH"] = ARCH
+    env["CROSS_COMPILE"] = f"{TOOLCHAIN_PATH}/{CROSS_COMPILE}"
+    env["CC"] = f"{TOOLCHAIN_PATH}/clang"
+    env["CLANG_TRIPLE"] = "aarch64-linux-android-"
+    env["LLVM"] = "1"
+    env["KERNELDIR"] = os.path.abspath(KERNEL_DIR)
+
+    run(f"make -C {env['KERNELDIR']} M=$(pwd) ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} modules", cwd=DRIVER_DIR, env=env)
 
 def main():
     print("=== AUTO BUILD MT7601U.ko UNTUK ANDROID ARM64 ===\n")
